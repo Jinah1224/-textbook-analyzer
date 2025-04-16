@@ -73,6 +73,8 @@ def contains_textbook(text):
 def get_news_body(url):
     try:
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        if res.status_code != 200:
+            return ""
         soup = BeautifulSoup(res.text, 'lxml')
         candidates = ["article", "article-body", "newsEndContents", "content", "viewContent"]
         for cls in candidates:
@@ -97,12 +99,15 @@ def get_news_date(url):
 def crawl_news_bs(keyword, pages=10):
     headers = {"User-Agent": "Mozilla/5.0"}
     results = []
-    seen = set()
+    seen_links = set()
+    seen_summaries = set()
 
     for page in range(1, pages + 1):
         start = (page - 1) * 10 + 1
         search_url = f"https://search.naver.com/search.naver?where=news&query={keyword}&sort=1&nso=so%3Add%2Cp%3A2w&start={start}"
         res = requests.get(search_url, headers=headers)
+        if res.status_code != 200:
+            continue
         soup = BeautifulSoup(res.text, "lxml")
         articles = soup.select(".news_area")
 
@@ -111,13 +116,14 @@ def crawl_news_bs(keyword, pages=10):
                 title_elem = a.select_one(".news_tit")
                 title = title_elem.get("title")
                 link = title_elem.get("href")
-                summary = a.select_one(".dsc_txt_wrap").get_text(strip=True)
+                summary_elem = a.select_one(".dsc_txt_wrap")
+                summary = summary_elem.get_text(strip=True) if summary_elem else ""
                 press = a.select_one(".info_group a").get_text(strip=True)
 
-                if link in seen or summary in seen:
+                if link in seen_links or summary in seen_summaries:
                     continue
-                seen.add(link)
-                seen.add(summary)
+                seen_links.add(link)
+                seen_summaries.add(summary)
 
                 body = get_news_body(link)
                 full_text = (summary + " " + body).lower()
@@ -216,8 +222,10 @@ with tab1:
 with tab2:
     st.subheader("📰 출판사 관련 뉴스 수집기 (최근 2주)")
     if st.button("크롤링 시작"):
-        df_news = pd.concat([crawl_news_bs(kw) for kw in keywords], ignore_index=True)
-        st.success("✅ 뉴스 크롤링 완료")
+        with st.spinner("🔍 뉴스 크롤링 중입니다..."):
+            df_news = pd.concat([crawl_news_bs(kw) for kw in keywords], ignore_index=True)
+
+        st.success(f"✅ 뉴스 크롤링 완료 - 총 {len(df_news)}건 수집됨")
         st.dataframe(df_news)
 
         st.download_button(
