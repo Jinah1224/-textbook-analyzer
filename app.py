@@ -222,8 +222,25 @@ with tab2:
     if not selected_keywords:
         st.warning("⚠️ 최소 하나 이상의 키워드를 선택해 주세요.")
     elif st.button("크롤링 시작"):
-        with st.spinner("🔄 뉴스 크롤링 중입니다..."):
-            df_news = pd.concat([crawl_news_bs(kw, pages=5) for kw in selected_keywords], ignore_index=True)
+        progress_text = "🔄 뉴스 크롤링 진행 중입니다. 잠시만 기다려주세요..."
+        progress_bar = st.progress(0, text=progress_text)
+
+        total_tasks = len(selected_keywords)
+        results = []
+
+        for i, kw in enumerate(selected_keywords):
+            df = crawl_news_bs(kw, pages=5)
+            results.append(df)
+            progress_pct = int(((i + 1) / total_tasks) * 100)
+            progress_bar.progress(progress_pct, text=f"{kw} 크롤링 완료 ({progress_pct}%)")
+
+        df_news = pd.concat(results, ignore_index=True)
+
         st.success(f"✅ 뉴스 크롤링 완료! 총 {len(df_news)}건의 뉴스 수집됨")
         st.dataframe(df_news)
-        st.download_button("📥 뉴스 데이터 다운로드", data=df_news.to_csv(index=False).encode("utf-8"), file_name="출판사_뉴스_크롤링_결과.csv", mime="text/csv")
+        st.download_button(
+            "📥 뉴스 데이터 다운로드",
+            data=df_news.to_csv(index=False).encode("utf-8"),
+            file_name="출판사_뉴스_크롤링_결과.csv",
+            mime="text/csv"
+        )
