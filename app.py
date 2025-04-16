@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from io import StringIO
 import re
@@ -46,36 +46,68 @@ subjects = ["국어", "수학", "사회", "과학", "영어", "도덕", "음악"
 complaint_keywords = ["안 왔어요", "아직", "늦게", "없어요", "오류", "문제", "왜", "헷갈려", "불편", "안옴", "지연", "안보여요", "못 받았", "힘들어요"]
 
 # -------------------------------
-# 함수 정의
+# 뉴스 크롤링 함수
 # -------------------------------
-def categorize_news(text):
-    text = text.lower()
-    for category, keywords in category_keywords.items():
-        if any(k in text for k in keywords):
-            return category
-    return "기타"
+def crawl_news_bs(keyword, pages=5):
+    headers = {"User-Agent": "Mozilla/5.0"}
+    results = []
+    seen = set()
+    today = datetime.today().date()
+    two_weeks_ago = today - timedelta(days=14)
 
-def check_publisher(text):
-    for pub in keywords:
-        if pub.lower() in text:
-            return pub
-    return "기타"
+    for page in range(1, pages + 1):
+        start = (page - 1) * 10 + 1
+        url = f"https://search.naver.com/search.naver?where=news&query={keyword}&sort=1&nso=so%3Add%2Cp%3A2w&start={start}"
+        try:
+            res = requests.get(url, headers=headers)
+            soup = BeautifulSoup(res.text, "lxml")
+            articles = soup.select(".news_area")
+            for a in articles:
+                try:
+                    title_elem = a.select_one(".news_tit")
+                    title = title_elem.get("title")
+                    link = title_elem.get("href")
+                    summary = a.select_one(".dsc_txt_wrap").get_text(strip=True)
+                    press = a.select_one(".info_group a").get_text(strip=True)
+                    if link in seen or summary in seen:
+                        continue
+                    seen.add(link)
+                    seen.add(summary)
 
-def match_keyword_flag(text):
-    for pub in keywords:
-        if pub.lower() in text:
-            return "O"
-    return "X"
+                    body = get_news_body(link)
+                    full_text = (summary + " " + body).lower()
 
-def contains_textbook(text):
-    return "O" if "교과서" in text or "발행사" in text else "X"
+                    date_str = get_news_date(link)
+                    try:
+                        article_date = datetime.strptime(date_str, "%Y.%m.%d").date()
+                        if article_date < two_weeks_ago:
+                            continue
+                    except:
+                        continue
+
+                    results.append({
+                        "출판사명": check_publisher(full_text),
+                        "카테고리": categorize_news(full_text),
+                        "날짜": date_str,
+                        "제목": title,
+                        "URL": link,
+                        "요약": summary,
+                        "언론사": press,
+                        "내용점검": match_keyword_flag(full_text),
+                        "본문내_교과서_또는_발행사_언급": contains_textbook(body)
+                    })
+                except:
+                    continue
+            time.sleep(0.3)
+        except:
+            continue
+    return pd.DataFrame(results)
 
 def get_news_body(url):
     try:
         res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
         soup = BeautifulSoup(res.text, 'lxml')
-        candidates = ["article", "article-body", "newsEndContents", "content", "viewContent"]
-        for cls in candidates:
+        for cls in ["article", "article-body", "newsEndContents", "content", "viewContent"]:
             tag = soup.find(class_=cls)
             if tag:
                 return tag.get_text(" ", strip=True)
@@ -94,45 +126,31 @@ def get_news_date(url):
     except:
         return "날짜 오류"
 
-def crawl_news_bs(keyword, pages=10):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    results = []
-    seen = set()
-    for page in range(1, pages + 1):
-        start = (page - 1) * 10 + 1
-        url = f"https://search.naver.com/search.naver?where=news&query={keyword}&sort=1&nso=so%3Add%2Cp%3A2w&start={start}"
-        res = requests.get(url, headers=headers)
-        soup = BeautifulSoup(res.text, "lxml")
-        articles = soup.select(".news_area")
-        for a in articles:
-            try:
-                title_elem = a.select_one(".news_tit")
-                title = title_elem.get("title")
-                link = title_elem.get("href")
-                summary = a.select_one(".dsc_txt_wrap").get_text(strip=True)
-                press = a.select_one(".info_group a").get_text(strip=True)
-                if link in seen or summary in seen:
-                    continue
-                seen.add(link)
-                seen.add(summary)
-                body = get_news_body(link)
-                full_text = (summary + " " + body).lower()
-                results.append({
-                    "출판사명": check_publisher(full_text),
-                    "카테고리": categorize_news(full_text),
-                    "날짜": get_news_date(link),
-                    "제목": title,
-                    "URL": link,
-                    "요약": summary,
-                    "언론사": press,
-                    "내용점검": match_keyword_flag(full_text),
-                    "본문내_교과서_또는_발행사_언급": contains_textbook(body)
-                })
-            except:
-                continue
-        time.sleep(0.3)
-    return pd.DataFrame(results)
+def categorize_news(text):
+    text = text.lower()
+    for category, words in category_keywords.items():
+        if any(w in text for w in words):
+            return category
+    return "기타"
 
+def check_publisher(text):
+    for pub in keywords:
+        if pub.lower() in text:
+            return pub
+    return "기타"
+
+def match_keyword_flag(text):
+    for pub in keywords:
+        if pub.lower() in text:
+            return "O"
+    return "X"
+
+def contains_textbook(text):
+    return "O" if "교과서" in text or "발행사" in text else "X"
+
+# -------------------------------
+# 카카오톡 분석 함수
+# -------------------------------
 def analyze_kakao(text):
     pattern = re.compile(r"(?P<datetime>\d{4}년 \d{1,2}월 \d{1,2}일 (오전|오후) \d{1,2}:\d{2}), (?P<sender>[^:]+) : (?P<message>.+)")
     matches = pattern.findall(text)
@@ -160,8 +178,8 @@ def analyze_kakao(text):
 def classify_category(text):
     if "배송" in text:
         return "배송"
-    for category, keywords in kakao_categories.items():
-        if any(k in text for k in keywords):
+    for category, words in kakao_categories.items():
+        if any(w in text for w in words):
             return category
     return "기타"
 
@@ -178,19 +196,16 @@ def extract_subject(text):
     return None
 
 def detect_complaint(text):
-    return any(k in text for k in complaint_keywords)
+    return any(w in text for w in complaint_keywords)
 
 # -------------------------------
-# Streamlit UI (탭 구성)
+# Streamlit UI
 # -------------------------------
 st.set_page_config(page_title="올인원 교과서 분석기", layout="wide")
 st.title("📚 교과서 커뮤니티 분석 & 뉴스 수집 올인원 앱")
 
 tab1, tab2 = st.tabs(["💬 카카오톡 분석", "📰 뉴스 크롤링"])
 
-# -------------------------------
-# 탭1: 카카오톡 분석
-# -------------------------------
 with tab1:
     st.subheader("📂 카카오톡 대화 분석기")
     uploaded_file = st.file_uploader("카카오톡 .txt 파일을 업로드하세요", type="txt")
@@ -199,25 +214,12 @@ with tab1:
         df_kakao = analyze_kakao(stringio.read())
         st.success("✅ 대화 분석 완료")
         st.dataframe(df_kakao)
-        st.download_button(
-            "📥 엑셀 다운로드",
-            data=df_kakao.to_csv(index=False).encode("utf-8"),
-            file_name="카카오톡_분석결과.csv",
-            mime="text/csv"
-        )
+        st.download_button("📥 엑셀 다운로드", data=df_kakao.to_csv(index=False).encode("utf-8"), file_name="카카오톡_분석결과.csv", mime="text/csv")
 
-# -------------------------------
-# 탭2: 뉴스 크롤링
-# -------------------------------
 with tab2:
     st.subheader("📰 출판사 관련 뉴스 수집기 (최근 2주)")
     if st.button("크롤링 시작"):
-        df_news = pd.concat([crawl_news_bs(kw) for kw in keywords], ignore_index=True)
+        df_news = pd.concat([crawl_news_bs(kw, pages=5) for kw in keywords], ignore_index=True)
         st.success("✅ 뉴스 크롤링 완료")
         st.dataframe(df_news)
-        st.download_button(
-            "📥 뉴스 데이터 다운로드",
-            data=df_news.to_csv(index=False).encode("utf-8"),
-            file_name="출판사_뉴스_크롤링_결과.csv",
-            mime="text/csv"
-        )
+        st.download_button("📥 뉴스 데이터 다운로드", data=df_news.to_csv(index=False).encode("utf-8"), file_name="출판사_뉴스_크롤링_결과.csv", mime="text/csv")
