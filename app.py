@@ -222,21 +222,34 @@ with tab2:
     if not selected_keywords:
         st.warning("⚠️ 최소 하나 이상의 키워드를 선택해 주세요.")
     elif st.button("크롤링 시작"):
-        progress_text = "🔄 뉴스 크롤링 진행 중입니다. 잠시만 기다려주세요..."
-        progress_bar = st.progress(0, text=progress_text)
+        progress_bar = st.progress(0, text="🔄 뉴스 크롤링 준비 중...")
+        status_placeholder = st.empty()
 
         total_tasks = len(selected_keywords)
         results = []
+        start_time = time.time()
 
         for i, kw in enumerate(selected_keywords):
+            kw_start = time.time()
             df = crawl_news_bs(kw, pages=5)
             results.append(df)
+
+            # 시간 계산
+            elapsed_time = time.time() - start_time
+            avg_time_per_keyword = elapsed_time / (i + 1)
+            remaining = int(avg_time_per_keyword * (total_tasks - (i + 1)))
+
+            mins, secs = divmod(remaining, 60)
+            eta = f"⏱ 예상 남은 시간: 약 {mins}분 {secs}초"
+
             progress_pct = int(((i + 1) / total_tasks) * 100)
-            progress_bar.progress(progress_pct, text=f"{kw} 크롤링 완료 ({progress_pct}%)")
+            progress_bar.progress(progress_pct, text=f"{kw} 완료 ({progress_pct}%)")
+            status_placeholder.info(eta)
 
         df_news = pd.concat(results, ignore_index=True)
+        status_placeholder.success("✅ 전체 크롤링 완료!")
 
-        st.success(f"✅ 뉴스 크롤링 완료! 총 {len(df_news)}건의 뉴스 수집됨")
+        st.success(f"총 {len(df_news)}건의 뉴스 수집 완료 ✅")
         st.dataframe(df_news)
         st.download_button(
             "📥 뉴스 데이터 다운로드",
